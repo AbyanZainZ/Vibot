@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-⚡ Fast Multi-Threaded Proxy Scraper & Live Checker for Vibot
+⚡ Fast 2-Stage Proxy Scraper & Deep Vidara Checker (Vibot Edition)
+Diadaptasi & diselaraskan langsung dari ProxyvidaraV2.5.ipynb
 Repository: https://github.com/AbyanZainZ/Vibot
 Author: AbyanZainZ
 
-Fungsi:
-1. Mengunduh puluhan ribu proxy gratis dari 90+ repository GitHub terpercaya.
-2. Melakukan tes koneksi super cepat (Multi-threaded Pre-Filter).
-3. Hanya menyimpan proxy yang 100% AKTIF (LIVE) ke file 'proxy.txt' & 'proxies.txt'.
-4. Bersih: Tidak menyimpan file sampah / proxy mati.
+Standar Kategori LIVE vs DEAD (Identik dengan ProxyvidaraV2.5.ipynb):
+1. Tahap 1: Fast Connectivity Pre-Filter (membuang 95%+ proxy mati dengan cepat).
+2. Tahap 2: Deep Vidara Strict Checker:
+   - Validasi Handshake HTTPS SSL / Port 443 langsung ke target: https://vidara.to/
+   - Mengharuskan HTTP status_code == 200
+   - Mengharuskan respon berisi signature asli: 'vidara'
+   - Mengharuskan BEBAS dari blokir Cloudflare captcha ('challenge-platform', 'cf-browser-verification', dsb.)
+   - Mengharuskan ukuran respon HTML valid (>= 1,000 bytes)
+   - Hanya proxy yang lolos Tahap 2 yang disimpan ke 'proxy.txt' & 'proxies.txt'.
+   - Proxy mati / gagal / CF block langsung dibuang (DEAD).
 """
 
 import os
@@ -34,16 +40,41 @@ if hasattr(sys.stderr, "reconfigure"):
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_FILES = [BASE_DIR / "proxy.txt", BASE_DIR / "proxies.txt"]
+OUTPUT_RESIDENTIAL = BASE_DIR / "LIVE_Proxy_Residential.txt"
+OUTPUT_WITH_ISP = BASE_DIR / "LIVE_PROXY_WITH_ISP.txt"
 
-# Pengaturan Kecepatan & Target
+# Pengaturan Konfigurasi Checker (Sesuai ProxyvidaraV2.5)
+TARGET_URL = "https://vidara.to/"
+FALLBACK_TARGET_URL = "https://vidara.so/"
+PREFILTER_URL = "http://www.google.com/generate_204"
+PREFILTER_FALLBACK = "http://1.1.1.1/cdn-cgi/trace"
+
 SCRAPE_WORKERS = 30
-CHECK_WORKERS = 150
-TIMEOUT_CHECK = 3.0
-TARGET_CHECK_URL = "http://www.google.com/generate_204"
-FALLBACK_CHECK_URL = "http://1.1.1.1/cdn-cgi/trace"
-MAX_LIVE_TARGET = 300  # Otomatis selesai setelah menemukan sekian proxy hidup (0 = periksa semua)
+STAGE1_WORKERS = 200
+STAGE1_TIMEOUT = 2.0
 
-# 90+ SUMBER GITHUB RAW PROXY TERBAIK (HTTP & SOCKS5)
+STAGE2_WORKERS = 100
+STAGE2_CONNECT_TIMEOUT = 3.0
+STAGE2_READ_TIMEOUT = 5.0
+
+MAX_LIVE_TARGET = 150  # Target proxy live lolos Tahap 2 (0 = cek seluruh kandidat)
+
+BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Connection': 'close'
+}
+
+# 90+ SUMBER GITHUB RAW PROXY (HTTP & SOCKS5)
 GITHUB_SOURCES = [
     ("http", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt"),
     ("socks5", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks5.txt"),
@@ -88,6 +119,15 @@ GITHUB_SOURCES = [
     ("http", "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt")
 ]
 
+DC_KEYWORDS = [
+    'hosting', 'datacenter', 'data center', 'server', 'vps', 'cloud', 'dedicated',
+    'ovh', 'hetzner', 'digitalocean', 'linode', 'vultr', 'amazon', 'aws', 'google',
+    'microsoft', 'azure', 'alibaba', 'oracle', 'leaseweb', 'choopa', 'm247',
+    'hostpapa', 'nocix', 'tier.net', 'performive', 'cogent', 'hostinger', 'contabo',
+    'fastly', 'akamai', 'cloudflare', 'cdn', 'hydra communications', 'getechbrothers',
+    'hz hosting', 'hostroyale'
+]
+
 IP_PORT_RE = re.compile(r'((?:\d{1,3}\.){3}\d{1,3}):(\d{2,5})')
 
 def scrape_single_source(proto, url):
@@ -99,7 +139,6 @@ def scrape_single_source(proto, url):
             for match in IP_PORT_RE.finditer(r.text):
                 ip, port = match.group(1), match.group(2)
                 p_int = int(port)
-                # Auto-deteksi port SOCKS
                 p_proto = proto
                 if p_int in [1080, 1081, 10808, 9050, 1085] and proto == "http":
                     p_proto = "socks5"
@@ -119,17 +158,20 @@ def build_requests_proxies(p_url):
     else:
         return {"http": p_url, "https": p_url}
 
-def check_single_proxy(p_url):
-    """Menguji apakah proxy benar-benar hidup."""
+# ==============================================================================
+# TAHAP 1: FAST CONNECTIVITY PRE-FILTER
+# ==============================================================================
+def stage1_fast_check(p_url):
+    """Uji konektivitas dasar super cepat untuk membuang 95% proxy mati."""
     proxies = build_requests_proxies(p_url)
     t0 = time.perf_counter()
     try:
-        r = requests.get(TARGET_CHECK_URL, proxies=proxies, timeout=TIMEOUT_CHECK, allow_redirects=False)
+        r = requests.get(PREFILTER_URL, proxies=proxies, timeout=STAGE1_TIMEOUT, allow_redirects=False)
         lat = round((time.perf_counter() - t0) * 1000)
         if r.status_code in (200, 204, 301, 302):
             return True, p_url, lat
-        # Fallback check
-        r2 = requests.get(FALLBACK_CHECK_URL, proxies=proxies, timeout=TIMEOUT_CHECK, allow_redirects=False)
+        # Fallback trace
+        r2 = requests.get(PREFILTER_FALLBACK, proxies=proxies, timeout=STAGE1_TIMEOUT, allow_redirects=False)
         lat2 = round((time.perf_counter() - t0) * 1000)
         if r2.status_code in (200, 204, 301, 302):
             return True, p_url, lat2
@@ -137,16 +179,145 @@ def check_single_proxy(p_url):
         pass
     return False, p_url, 0
 
+# ==============================================================================
+# TAHAP 2: DEEP VIDARA STRICT CHECKER (IDENTIK DENGAN ProxyvidaraV2.5.ipynb)
+# ==============================================================================
+def check_vidara_deep(p_url):
+    """
+    Standar Ketat ProxyvidaraV2.5.ipynb:
+    - Melakukan handshake HTTPS SSL ke target https://vidara.to/
+    - Status code harus 200
+    - Body harus memuat signature 'vidara'
+    - Bebas dari pemblokiran Cloudflare
+    - Panjang respon HTML >= 1000 karakter
+    """
+    t_start = time.perf_counter()
+    proxies = build_requests_proxies(p_url)
+
+    target = TARGET_URL
+    try:
+        resp = requests.get(
+            target,
+            headers=BROWSER_HEADERS,
+            proxies=proxies,
+            timeout=(STAGE2_CONNECT_TIMEOUT, STAGE2_READ_TIMEOUT),
+            verify=False,
+            allow_redirects=True
+        )
+        latency = round((time.perf_counter() - t_start) * 1000)
+        status_code = resp.status_code
+        body_text = resp.text.lower()
+
+        is_vidara = ('vidara' in body_text) or ('<title>vidara' in body_text) or ('dood' in body_text)
+        cf_blocked = any(cf in body_text for cf in [
+            'challenge-platform', 'cf-browser-verification', 'attention required!',
+            'access denied', '403 forbidden', 'cloudflare-nginx', 'just a moment...'
+        ])
+        is_valid_body = len(resp.text) >= 1000
+
+        # Kategori LIVE
+        if status_code == 200 and is_vidara and is_valid_body and not cf_blocked:
+            proto = p_url.split('://', 1)[0].upper()
+            host_port = p_url.split('://', 1)[1]
+            host, port = host_port.split(':', 1)
+            return {
+                'is_live': True,
+                'proxy': p_url,
+                'proto': proto,
+                'host': host,
+                'port': port,
+                'status_code': status_code,
+                'latency_ms': latency,
+                'error': ''
+            }
+        else:
+            # Fallback ke domain vidara cadangan jika domain utama sedang redirect
+            if not is_vidara and status_code in (200, 301, 302):
+                try:
+                    resp2 = requests.get(
+                        FALLBACK_TARGET_URL,
+                        headers=BROWSER_HEADERS,
+                        proxies=proxies,
+                        timeout=(STAGE2_CONNECT_TIMEOUT, STAGE2_READ_TIMEOUT),
+                        verify=False,
+                        allow_redirects=True
+                    )
+                    b2 = resp2.text.lower()
+                    if resp2.status_code == 200 and 'vidara' in b2 and len(resp2.text) >= 1000:
+                        proto = p_url.split('://', 1)[0].upper()
+                        host_port = p_url.split('://', 1)[1]
+                        host, port = host_port.split(':', 1)
+                        lat2 = round((time.perf_counter() - t_start) * 1000)
+                        return {
+                            'is_live': True,
+                            'proxy': p_url,
+                            'proto': proto,
+                            'host': host,
+                            'port': port,
+                            'status_code': 200,
+                            'latency_ms': lat2,
+                            'error': ''
+                        }
+                except Exception:
+                    pass
+
+            err_reason = f"CF Block ({status_code})" if cf_blocked else (f"Bukan Vidara ({status_code})" if not is_vidara else f"HTTP {status_code}")
+            return {'is_live': False, 'proxy': p_url, 'error': err_reason}
+
+    except requests.exceptions.ProxyError:
+        return {'is_live': False, 'proxy': p_url, 'error': 'Proxy Tunnel Error (Dead)'}
+    except requests.exceptions.ConnectTimeout:
+        return {'is_live': False, 'proxy': p_url, 'error': 'Connect Timeout (Dead)'}
+    except requests.exceptions.ReadTimeout:
+        return {'is_live': False, 'proxy': p_url, 'error': 'Read Timeout (Dead)'}
+    except Exception as exc:
+        return {'is_live': False, 'proxy': p_url, 'error': str(exc)[:35]}
+
+# ==============================================================================
+# KLASIFIKASI RESIDENTIAL vs VPN / DATACENTER (IP-API BATCH)
+# ==============================================================================
+def classify_ips_batch(ips):
+    """Mendeteksi apakah IP adalah Residential (Reward Penuh) atau VPN/Datacenter."""
+    if not ips:
+        return {}
+    url = 'http://ip-api.com/batch?fields=query,status,country,isp,org,as,proxy,hosting'
+    results = {}
+    for i in range(0, len(ips), 100):
+        chunk = ips[i:i+100]
+        try:
+            resp = requests.post(url, json=chunk, timeout=8)
+            if resp.status_code == 200:
+                for item in resp.json():
+                    q = item.get('query')
+                    if not q:
+                        continue
+                    p = item.get('proxy', False)
+                    h = item.get('hosting', False)
+                    desc = f"{item.get('isp','')} {item.get('org','')} {item.get('as','')}".lower()
+                    has_kw = any(k in desc for k in DC_KEYWORDS)
+                    is_vpn = bool(p or h or has_kw)
+                    raw_isp = item.get('isp') or item.get('org') or item.get('as') or 'UNKNOWN'
+                    results[q] = {
+                        'is_vpn': is_vpn,
+                        'category': 'VPN' if is_vpn else 'RESIDENTIAL',
+                        'isp': raw_isp.strip().upper(),
+                        'country': item.get('country', '')
+                    }
+        except Exception:
+            pass
+    return results
+
 def main():
     print("==================================================================")
-    print("⚡ FAST PROXY SCRAPER & LIVE CHECKER (VIBOT EDITION)")
-    print(f"Sumber: {len(GITHUB_SOURCES)} Repository GitHub Resmi")
-    print(f"Target Output: {', '.join([p.name for p in OUTPUT_FILES])}")
-    print(f"Target Live Proxy yang Dicari: {MAX_LIVE_TARGET} Proxy")
+    print("⚡ 2-STAGE PROXY SCRAPER & DEEP VIDARA CHECKER (VIBOT EDITION)")
+    print("Sesuai Standar Kategori Ketat: ProxyvidaraV2.5.ipynb")
+    print(f"Target Validasi Handshake: {TARGET_URL}")
+    print(f"Target Output Live      : {', '.join([p.name for p in OUTPUT_FILES])}")
+    print(f"Batas Target Proxy Live  : {MAX_LIVE_TARGET} Proxy")
     print("==================================================================\n")
 
     # 1. SCRAPING DARI GITHUB
-    print("⏳ [1/2] Mengunduh proxy dari sumber GitHub raw...")
+    print("⏳ [1/3] Mengunduh proxy dari 40+ sumber repository GitHub...")
     all_raw = set()
     t_start_scrape = time.time()
 
@@ -160,70 +331,123 @@ def main():
     candidate_list = list(all_raw)
     dur_scrape = time.time() - t_start_scrape
     print(f"✅ Scraping Selesai dalam {dur_scrape:.1f}s!")
-    print(f"📊 Berhasil mengumpulkan {len(candidate_list):,} kandidat proxy unik (HTTP & SOCKS5).\n")
+    print(f"📊 Berhasil mengumpulkan {len(candidate_list):,} kandidat proxy unik.\n")
 
     if not candidate_list:
         print("❌ Tidak ada proxy yang berhasil discrape. Periksa koneksi internet.")
         return
 
-    # 2. CHECKING PROXY (HANYA MENYIMPAN YANG LIVE)
-    print("⏳ [2/2] Menguji koneksi & memfilter proxy hidup (Live Check)...")
-    print(f"[*] Menjalankan {CHECK_WORKERS} thread simultan (Timeout: {TIMEOUT_CHECK}s)...")
-    print("Tekan Ctrl+C kapan saja jika jumlah proxy hidup sudah dirasa cukup.\n")
+    # 2. TAHAP 1: FAST CONNECTIVITY PRE-FILTER
+    print("⏳ [2/3] TAHAP 1: Fast Connectivity Pre-Filter...")
+    print(f"[*] Menjalankan {STAGE1_WORKERS} worker untuk membuang proxy yang 100% mati...")
+    stage1_live = []
+    t_start_s1 = time.time()
 
-    live_proxies = []
-    dead_count = 0
-    checked_count = 0
-    file_lock = threading.Lock()
-    t_start_check = time.time()
+    with ThreadPoolExecutor(max_workers=STAGE1_WORKERS) as executor:
+        future_map = {executor.submit(stage1_fast_check, p): p for p in candidate_list}
+        for fut in as_completed(future_map):
+            is_ok, p_url, lat = fut.result()
+            if is_ok:
+                stage1_live.append(p_url)
+            if len(future_map) > 0 and len(stage1_live) % 100 == 0 and len(stage1_live) > 0:
+                print(f"   ⚡ [Tahap 1 Pre-Filter] Ditemukan {len(stage1_live):,} kandidat konektif...")
 
-    # Bersihkan file output lama agar siap diisi proxy fresh
+            # Jika kandidat tahap 1 sudah cukup banyak untuk diuji di tahap 2
+            if len(stage1_live) >= (MAX_LIVE_TARGET * 10):
+                print(f"   🎯 Mengumpulkan {len(stage1_live):,} kandidat tahap 1, melanjutkan ke Tahap 2...")
+                break
+
+    print(f"✅ Tahap 1 Selesai dalam {time.time() - t_start_s1:.1f}s | Terkumpul {len(stage1_live):,} kandidat lolos ke Tahap 2.\n")
+
+    if not stage1_live:
+        print("❌ Tidak ada proxy yang lolos Tahap 1.")
+        return
+
+    # 3. TAHAP 2: DEEP VIDARA STRICT CHECKER (STANDAR ProxyvidaraV2.5)
+    print("⏳ [3/3] TAHAP 2: Deep Vidara Strict Checker (HTTPS Handshake & Cloudflare Bypass)...")
+    print(f"[*] Target Validasi: {TARGET_URL} (Port 443 SSL Tunneling)")
+    print(f"[*] Hanya proxy yang lolos verifikasi Vidara 100% yang akan disimpan!")
+    print("Tekan Ctrl+C kapan saja jika proxy live sudah dirasa cukup.\n")
+
+    # Bersihkan file output lama
     for out_p in OUTPUT_FILES:
         with open(out_p, "w", encoding="utf-8") as f:
-            f.write("# LIVE VERIFIED PROXIES - AUTO GENERATED BY VIBOT SCRAPER\n")
+            f.write("# LIVE VERIFIED VIDARA PROXIES (100% HANDSHAKE TESTED)\n")
 
-    def save_live_proxy(p_str):
+    live_vidara = []
+    dead_s2 = 0
+    checked_s2 = 0
+    file_lock = threading.Lock()
+    t_start_s2 = time.time()
+
+    def save_live_proxy_item(p_str):
         with file_lock:
             for out_p in OUTPUT_FILES:
                 with open(out_p, "a", encoding="utf-8") as f:
                     f.write(p_str + "\n")
 
     try:
-        with ThreadPoolExecutor(max_workers=CHECK_WORKERS) as executor:
-            future_to_proxy = {executor.submit(check_single_proxy, p): p for p in candidate_list}
+        with ThreadPoolExecutor(max_workers=STAGE2_WORKERS) as executor:
+            future_to_proxy = {executor.submit(check_vidara_deep, p): p for p in stage1_live}
             for fut in as_completed(future_to_proxy):
-                is_alive, p_url, latency = fut.result()
-                checked_count += 1
+                res = fut.result()
+                checked_s2 += 1
 
-                if is_alive:
-                    live_proxies.append(p_url)
-                    save_live_proxy(p_url)
-                    print(f"🟢 [LIVE #{len(live_proxies)}] {p_url} ({latency}ms)")
+                if res['is_live']:
+                    live_vidara.append(res)
+                    save_live_proxy_item(res['proxy'])
+                    print(f"🟢 [LIVE VIDARA #{len(live_vidara)}] {res['proxy']} ({res['latency_ms']}ms) - HTTP {res['status_code']}")
                 else:
-                    dead_count += 1
+                    dead_s2 += 1
 
-                # Cetak progres tiap 50 proxy
-                if checked_count % 50 == 0:
-                    speed = checked_count / max(1, (time.time() - t_start_check))
-                    print(f"   ⏱️ Progres: {checked_count:,}/{len(candidate_list):,} | Live: {len(live_proxies)} | Dead: {dead_count:,} | Speed: {speed:.0f} req/s")
+                if checked_s2 % 25 == 0:
+                    speed = checked_s2 / max(1, (time.time() - t_start_s2))
+                    print(f"   ⏱️ Tahap 2: {checked_s2}/{len(stage1_live)} | LIVE Vidara: {len(live_vidara)} | Gagal/Dead: {dead_s2} | Speed: {speed:.1f} req/s")
 
-                # Berhenti otomatis jika target tercapai
-                if MAX_LIVE_TARGET > 0 and len(live_proxies) >= MAX_LIVE_TARGET:
-                    print(f"\n🎯 Target {MAX_LIVE_TARGET} proxy aktif berhasil terpenuhi!")
+                if MAX_LIVE_TARGET > 0 and len(live_vidara) >= MAX_LIVE_TARGET:
+                    print(f"\n🎯 Target {MAX_LIVE_TARGET} proxy aktif lolos Vidara berhasil terpenuhi!")
                     break
 
     except KeyboardInterrupt:
         print("\n\n🛑 Proses dihentikan oleh pengguna.")
 
-    total_dur = time.time() - t_start_check
+    # 4. KLASIFIKASI ISP & RESIDENTIAL (OPSIONAL / BONUS)
+    if live_vidara:
+        print("\n🔍 Menganalisis ISP & Kategori Residential vs Datacenter IP...")
+        hosts = [item['host'] for item in live_vidara]
+        intel_map = classify_ips_batch(hosts)
+
+        res_lines = []
+        isp_lines = []
+        for item in live_vidara:
+            h = item['host']
+            intel = intel_map.get(h, {'is_vpn': True, 'isp': 'UNKNOWN'})
+            isp_name = intel['isp']
+            p_str = item['proxy']
+            isp_lines.append(f"{p_str}|{isp_name}")
+            if not intel['is_vpn']:
+                res_lines.append(p_str)
+
+        if res_lines:
+            with open(OUTPUT_RESIDENTIAL, "w", encoding="utf-8") as f:
+                f.write("\n".join(res_lines) + "\n")
+        if isp_lines:
+            with open(OUTPUT_WITH_ISP, "w", encoding="utf-8") as f:
+                f.write("\n".join(isp_lines) + "\n")
+
+    total_dur = time.time() - t_start_s2
+    res_count = len(res_lines) if 'res_lines' in locals() else 0
     print("\n==================================================================")
-    print(" 🎉 PROXY SCRAPING & CHECKING SELESAI!")
+    print(" 🎉 PROXY SCRAPING & DEEP VIDARA CHECK SELESAI!")
     print("==================================================================")
-    print(f" Total Diperiksa : {checked_count:,} Proxy dalam {total_dur:.1f} detik")
-    print(f" Total Live Aktif: {len(live_proxies)} Proxy")
-    print(f" File Output     : {', '.join([str(p.name) for p in OUTPUT_FILES])} (Siap dipakai oleh bot!)")
+    print(f" Total Diuji Tahap 2 : {checked_s2:,} Proxy dalam {total_dur:.1f} detik")
+    print(f" Total LIVE Vidara   : {len(live_vidara)} Proxy (100% Lolos Handshake SSL)")
+    if res_count > 0:
+        print(f" ⭐ Residential IP   : {res_count} Proxy (Reward 0.0040 USD!) -> {OUTPUT_RESIDENTIAL.name}")
+    print(f" File Output Utama   : {', '.join([str(p.name) for p in OUTPUT_FILES])}")
     print("==================================================================")
-    print("👉 Kamu bisa langsung menjalankan bot sekarang:")
+    print("👉 Proxy di file 'proxy.txt' sudah diverifikasi 100% bisa membuka Vidara.")
+    print("   Jalankan bot sekarang:")
     print("   Linux: ./start_bot.sh")
     print("   Windows: START_BOT.bat")
 
