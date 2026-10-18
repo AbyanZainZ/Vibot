@@ -11,44 +11,34 @@ Cukup copy-paste perintah ini ke terminal Linux kamu:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AbyanZainZ/Vibot/main/install.sh | bash
 ```
-*(Script akan otomatis meng-clone Vibot ke `~/Vibot`, memasang python3, pip, playwright, dan dependensi browser).*
 
 ### 🪟 Di VPS Windows (PowerShell):
 Buka PowerShell lalu jalankan:
 ```powershell
 irm https://raw.githubusercontent.com/AbyanZainZ/Vibot/main/install.ps1 | iex
 ```
-*(Script akan otomatis mengunduh Vibot ke Desktop / `C:\Vibot` dan menyiapkan dependensinya).*
 
 ---
 
-## 🚀 Cara Menjalankan Bot Setelah Terpasang
+## 📁 Struktur File Lebih Rapi (Terpisah Sendiri-Sendiri):
 
-### Di Linux:
-```bash
-cd ~/Vibot
-./start_bot.sh
-```
+Sekarang kamu tidak perlu repot mengedit array di dalam config! Semuanya sudah dipisah sendiri-sendiri:
 
-### Di Windows:
-Masuk ke folder `Vibot` di Desktop, lalu double-click file:
-```cmd
-START_BOT.bat
-```
+| File | Fungsi | Keterangan |
+| :--- | :--- | :--- |
+| **`link.txt`** | **Daftar Link Video** | Masukkan link video target (1 baris per link). Bebas masukkan puluhan/ratusan link! |
+| **`proxies.txt`** | **Daftar Proxy** | Masukkan proxy kamu (1 baris per proxy). Mendukung HTTP & SOCKS5. |
+| **`config.json`** | **Pengaturan Engine** | Cukup untuk mengatur durasi tonton, jumlah slot browser, headless, dll. |
+| **`START_BOT.bat`** | **Launcher Windows** | Klik 2x untuk menjalankan bot di VPS Windows. |
+| **`start_bot.sh`** | **Launcher Linux** | Jalankan `./start_bot.sh` di VPS Linux / Docker. |
 
 ---
 
-## ⚙️ Panduan Konfigurasi (`config.json`)
-
-Kamu bisa mengedit target URL dan pengaturan bot di file `config.json` tanpa menyentuh kode python:
+## ⚙️ Pengaturan di `config.json`
 
 ```json
 {
-  "target_urls": [
-    "https://vidara.so/v/UDQvQR86iSidN",
-    "https://vidara.to/v/bajvKatP3cxK",
-    "https://playmogo.com/d/2kgtwakxl10w"
-  ],
+  "link_file": "link.txt",
   "engine_mode": "camoufox",
   "headless_mode": true,
   "max_concurrent_browsers": 2,
@@ -60,13 +50,8 @@ Kamu bisa mengedit target URL dan pengaturan bot di file `config.json` tanpa men
   "prevent_windows_sleep": true,
   "proxy_pool": {
     "proxy_file": "proxies.txt",
-    "default_protocol": "socks5",
+    "default_protocol": "http",
     "rotation_mode": "random"
   }
 }
 ```
-
-### Opsi Protokol Proxy:
-* `"default_protocol": "socks5"` -> Jika daftar proxy berupa IP:PORT polosan SOCKS5.
-* `"default_protocol": "http"` -> Jika daftar proxy berupa IP:PORT polosan HTTP.
-* Jika baris proxy di `proxies.txt` sudah ada prefix `http://` atau `socks5://`, bot akan otomatis mengikuti protokol di baris tersebut.

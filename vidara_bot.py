@@ -55,26 +55,14 @@ Jeda_Antar_Putaran_Detik = 10
 Maksimal_Retry_Proxy_Gagal = 5
 Nama_File_Proxy_Lokal = "proxies.txt"
 Default_Protokol_Cadangan = "HTTP"
-
-target_urls = [
-    "https://vidara.so/v/UDQvQR86iSidN",
-    "https://vidara.to/v/bajvKatP3cxK",
-    "https://vidara.to/v/TpIkkDRdFiiY",
-    "https://vidara.to/v/IggCpQgKVfCS",
-    "https://vidara.to/v/1zUQttZOpCuY",
-    "https://vidara.to/v/LpRqYH4UAgTUS",
-    "https://vidara.to/v/VFF4XpP1n2nK",
-    "https://vidara.to/v/Z4Q7Q2Q8uX5s",
-    "https://playmogo.com/d/2kgtwakxl10w",
-    "https://playmogo.com/d/xamx63i20glo"
-]
+Nama_File_Link_Lokal = "link.txt"
 
 if CONFIG_PATH.exists():
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as cf:
             cfg = json.load(cf)
-        if "target_urls" in cfg and cfg["target_urls"]:
-            target_urls = [u.strip() for u in cfg["target_urls"] if u.strip()]
+        if "link_file" in cfg:
+            Nama_File_Link_Lokal = cfg["link_file"].strip()
         if "engine_mode" in cfg:
             if "playwright" in cfg["engine_mode"].lower():
                 Engine_Mode = "Playwright Standar (Chromium)"
@@ -107,9 +95,41 @@ if CONFIG_PATH.exists():
     except Exception as e:
         print(f"⚠️ Gagal membaca config.json ({e}), menggunakan konfigurasi default.")
 
-# Map target URLs to Link_1 ... Link_20
-for i in range(1, 21):
-    globals()[f"Link_{i}"] = target_urls[i-1] if i <= len(target_urls) else ""
+# ================= 2. LOAD TARGET LINKS (DARI LINK.TXT) =================
+target_urls = []
+link_candidates = [
+    BASE_DIR / Nama_File_Link_Lokal,
+    Path(Nama_File_Link_Lokal),
+    BASE_DIR / "link.txt",
+    BASE_DIR / "links.txt",
+    Path("link.txt"),
+    Path("links.txt"),
+]
+
+for lp in link_candidates:
+    if lp.exists() and lp.is_file():
+        with open(lp, "r", encoding="utf-8", errors="ignore") as lf:
+            for line in lf:
+                l_str = line.strip()
+                if l_str and not l_str.startswith("#") and l_str.startswith(("http://", "https://")):
+                    target_urls.append(l_str)
+        if target_urls:
+            print(f"📖 Membaca {len(target_urls)} target link dari file: {lp.resolve()}")
+            break
+
+# Fallback jika link.txt belum ada / kosong
+if not target_urls:
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as cf:
+                cfg = json.load(cf)
+            if "target_urls" in cfg and cfg["target_urls"]:
+                target_urls = [u.strip() for u in cfg["target_urls"] if u.strip() and u.strip().startswith(("http://", "https://"))]
+        except Exception:
+            pass
+
+if not target_urls:
+    print(f"⚠️ Peringatan: Tidak ada link ditemukan di {Nama_File_Link_Lokal}! Silakan isi link video ke dalam file {Nama_File_Link_Lokal} (1 baris per link).")
 
 # Windows Anti-Sleep Protection
 if sys.platform == "win32":
@@ -717,14 +737,34 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
                 else:
                     camoufox_os = "windows"
 
-                browser_cm = AsyncCamoufox(
-                    headless=headless_mode,
-                    os=camoufox_os,
-                    args=CAMOUFOX_ARGS,
-                    proxy=pw_proxy,
-                    geoip=True if pw_proxy else False
-                )
-                browser_obj = await browser_cm.__aenter__()
+                # Auto-heal BadStatusLine SOCKS proxy
+                use_geoip = False
+                try:
+                    browser_cm = AsyncCamoufox(
+                        headless=headless_mode,
+                        os=camoufox_os,
+                        args=CAMOUFOX_ARGS,
+                        proxy=pw_proxy,
+                        geoip=use_geoip
+                    )
+                    browser_obj = await browser_cm.__aenter__()
+                except Exception as b_err:
+                    b_err_str = str(b_err)
+                    if "BadStatusLine" in b_err_str or "\x05" in b_err_str or "0x05" in b_err_str:
+                        if proxy and proxy.protocol != "socks5":
+                            print(f"[{task['id']}] 🔄 Mendeteksi port SOCKS5 pada {proxy.host}:{proxy.port}. Mengubah protokol otomatis ke SOCKS5...")
+                            proxy.protocol = "socks5"
+                            pw_proxy = proxy.to_playwright()
+                            browser_cm = AsyncCamoufox(
+                                headless=headless_mode,
+                                os=camoufox_os,
+                                args=CAMOUFOX_ARGS,
+                                proxy=pw_proxy,
+                                geoip=False
+                            )
+                            browser_obj = await browser_cm.__aenter__()
+                    else:
+                        raise b_err
                 context = await browser_obj.new_context(
                     ignore_https_errors=True,
                     viewport=profile['viewport'],
@@ -930,15 +970,33 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
                 except Exception:
                     pass
 
-                # Hanya klik tombol play jika video belum berputar
+                # Hapus overlay iklan transparan DoodStream & Vidara yang menghalangi klik
+                try:
+                    await page.evaluate("""() => {
+                        const overlays = document.querySelectorAll('a[target="_blank"], div[id*="overlay"], div[class*="overlay"], div[style*="z-index: 2147483647"], div[style*="z-index: 999999"]');
+                        overlays.forEach(el => el.remove());
+                    }""")
+                except Exception:
+                    pass
+
+                # Klik tombol play (Lakukan 2x klik cepat untuk membypass ad-trap popup)
                 try:
                     play_btn = await page.query_selector(
-                        ".vjs-big-play-button, button.vjs-big-play-button, .jw-display-icon-display, .jw-icon-playback, button[aria-label='Play'], .play-button"
+                        ".vjs-big-play-button, button.vjs-big-play-button, .jw-display-icon-display, .jw-icon-playback, button[aria-label='Play'], .play-button, #os_player"
                     )
                     if play_btn and await play_btn.is_visible():
-                        await play_btn.click()
-                    elif not has_video_tag:
-                        # Hanya klik tengah jika tag <video> belum muncul sama sekali
+                        await play_btn.click(force=True)
+                        await asyncio.sleep(0.5)
+                        # Klik kedua untuk memulai video jika klik pertama diserap iklan
+                        try:
+                            if play_btn and await play_btn.is_visible():
+                                await play_btn.click(force=True)
+                        except Exception:
+                            pass
+                    else:
+                        # Klik tengah layar video
+                        await page.mouse.click(vp['width'] / 2, vp['height'] / 2)
+                        await asyncio.sleep(0.5)
                         await page.mouse.click(vp['width'] / 2, vp['height'] / 2)
                 except Exception:
                     pass
@@ -1077,9 +1135,7 @@ async def main_engine_v3():
     # Init lock
     pass
 
-    raw_slots = [Link_1, Link_2, Link_3, Link_4, Link_5, Link_6, Link_7, Link_8, Link_9, Link_10,
-                 Link_11, Link_12, Link_13, Link_14, Link_15, Link_16, Link_17, Link_18, Link_19, Link_20]
-    links = [l.strip() for l in raw_slots if l and isinstance(l, str) and l.strip() and l.strip().startswith(('http://', 'https://'))]
+    links = [l.strip() for l in target_urls if l and isinstance(l, str) and l.strip().startswith(('http://', 'https://'))]
 
     if not links:
         print("Daftar URL target kosong. Silakan isi slot Link di Cell 2.")
