@@ -51,10 +51,11 @@ echo "[*] Memasang library Python..."
 "$TARGET_DIR/venv/bin/python" -m pip install --upgrade pip 2>/dev/null || true
 "$TARGET_DIR/venv/bin/pip" install -r requirements.txt
 
-# 4. Unduh Engine Browser Playwright
+# 4. Unduh Engine Browser Playwright & Camoufox
 echo ""
-echo "⏳ [4/4] Memasang driver browser Playwright (Chromium & Firefox)..."
+echo "⏳ [4/4] Memasang driver browser Playwright & Camoufox..."
 "$TARGET_DIR/venv/bin/playwright" install chromium firefox 2>/dev/null || true
+"$TARGET_DIR/venv/bin/camoufox" fetch --geoip 2>/dev/null || true
 
 chmod +x "$TARGET_DIR/start_bot.sh"
 chmod +x "$TARGET_DIR/start_proxyScrape.sh" 2>/dev/null || true
