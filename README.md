@@ -1,27 +1,46 @@
-# 🎬 Vidara & DoodStream Viewer Bot V4.5 (Clean Proxy-Only Edition)
+# 🎬 Vibot: Vidara & DoodStream Multi-Proxy Viewer Bot V4.5
 
-Versi bersih **khusus Proxy (HTTP & SOCKS5)** tanpa ketergantungan VPN Surfshark, wireproxy, atau konfigurasi kernel yang rumit. 100% Cross-Platform: bisa dijalankan di **VPS Windows**, **VPS Linux**, maupun **Docker Cloud Sandbox**.
+Bot pemutar video **DoodStream & Vidara** otomatis berbasis **Clean Multi-Proxy (HTTP & SOCKS5)** dengan sistem anti-detect stealth (Camoufox & Playwright), anti-ad popup killer, dan rotasi proxy otomatis.
 
 ---
 
-## 🚀 Fitur Utama
-* **Proxy-Only Engine:** Mendukung proxy **HTTP**, **HTTPS**, dan **SOCKS5** (dengan autentikasi username & password).
-* **Multi-Format Parser:** Otomatis mengenali format proxy:
-  * `ip:port`
-  * `ip:port:user:pass`
-  * `user:pass@ip:port`
-  * `socks5://ip:port` atau `http://user:pass@ip:port`
-* **Configurable `default_protocol`:** Bisa diatur ke `"http"` atau `"socks5"` di `config.json`.
-* **Zero VPN Dependency:** Ringan, instan, tidak butuh admin WireGuard / wireproxy.exe.
-* **Dual Engine:** Mendukung **Camoufox (Stealth Anti-Detect)** dan **Playwright Chromium (Low-CPU)**.
-* **Auto Ad-Popup Killer:** Membunuh popunder dan tab iklan DoodStream / Vidara tanpa menutup video utama.
-* **Cross-Platform:** Tersedia launcher otomatis untuk Windows (`.bat`) dan Linux (`.sh`).
+## ⚡ Perintah Cepat 1 Baris untuk Install di VPS (CLI)
+
+### 🐧 Di VPS Linux (Ubuntu / Debian):
+Cukup copy-paste perintah ini ke terminal Linux kamu:
+```bash
+curl -fsSL https://raw.githubusercontent.com/AbyanZainZ/Vibot/main/install.sh | bash
+```
+*(Script akan otomatis meng-clone Vibot ke `~/Vibot`, memasang python3, pip, playwright, dan dependensi browser).*
+
+### 🪟 Di VPS Windows (PowerShell):
+Buka PowerShell lalu jalankan:
+```powershell
+irm https://raw.githubusercontent.com/AbyanZainZ/Vibot/main/install.ps1 | iex
+```
+*(Script akan otomatis mengunduh Vibot ke Desktop / `C:\Vibot` dan menyiapkan dependensinya).*
+
+---
+
+## 🚀 Cara Menjalankan Bot Setelah Terpasang
+
+### Di Linux:
+```bash
+cd ~/Vibot
+./start_bot.sh
+```
+
+### Di Windows:
+Masuk ke folder `Vibot` di Desktop, lalu double-click file:
+```cmd
+START_BOT.bat
+```
 
 ---
 
 ## ⚙️ Panduan Konfigurasi (`config.json`)
 
-Kamu bisa mengedit file `config.json` tanpa perlu menyentuh kode Python:
+Kamu bisa mengedit target URL dan pengaturan bot di file `config.json` tanpa menyentuh kode python:
 
 ```json
 {
@@ -47,34 +66,7 @@ Kamu bisa mengedit file `config.json` tanpa perlu menyentuh kode Python:
 }
 ```
 
-### Opsi `default_protocol`:
-* `"socks5"`: Baris proxy polosan (`ip:port` atau `ip:port:user:pass`) akan otomatis dijalankan sebagai SOCKS5.
-* `"http"`: Baris proxy polosan akan otomatis dijalankan sebagai HTTP proxy.
-* *Catatan:* Jika baris proxy di file `proxies.txt` sudah diawali `socks5://` atau `http://`, bot akan otomatis mengikuti protokol di baris tersebut.
-
----
-
-## 💻 Cara Menjalankan
-
-### Di VPS Windows:
-1. Masukkan list proxy ke file `proxies.txt`.
-2. Klik 2x file:
-   ```cmd
-   START_BOT.bat
-   ```
-*(Script akan otomatis memeriksa Python, menginstal library jika belum ada, dan menjalankan bot).*
-
-### Di VPS Linux / Docker Sandbox:
-1. Berikan izin eksekusi:
-   ```bash
-   chmod +x start_bot.sh
-   ./start_bot.sh
-   ```
-
----
-
-## 🌐 Auto-Installer untuk GitHub
-Jika di-upload ke GitHub, kamu bisa memasang Web Desktop + Bot ini di VPS Linux baru hanya dengan 1 baris perintah:
-```bash
-curl -fsSL https://raw.githubusercontent.com/<username>/<repo>/main/auto_install.sh | bash
-```
+### Opsi Protokol Proxy:
+* `"default_protocol": "socks5"` -> Jika daftar proxy berupa IP:PORT polosan SOCKS5.
+* `"default_protocol": "http"` -> Jika daftar proxy berupa IP:PORT polosan HTTP.
+* Jika baris proxy di `proxies.txt` sudah ada prefix `http://` atau `socks5://`, bot akan otomatis mengikuti protokol di baris tersebut.
