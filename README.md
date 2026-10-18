@@ -2,15 +2,18 @@
 
 Bot pemutar video **DoodStream & Vidara** otomatis berbasis **Clean Multi-Proxy (HTTP & SOCKS5)** dengan sistem anti-detect stealth (Camoufox & Playwright), anti-ad popup killer, dan rotasi proxy otomatis.
 
+Kini dilengkapi dengan **Proxy Scraper & Live Checker Otomatis** bawaan tanpa ribet mencari proxy manual!
+
 ---
 
 ## ⚡ Perintah Cepat 1 Baris untuk Install di VPS (CLI)
 
-### 🐧 Di VPS Linux (Ubuntu / Debian):
+### 🐧 Di VPS Linux (Ubuntu / Debian / Docker):
 Cukup copy-paste perintah ini ke terminal Linux kamu:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AbyanZainZ/Vibot/main/install.sh | bash
 ```
+> Program akan otomatis diinstall rapi di folder `/VidBot` (atau `~/VidBot`).
 
 ### 🪟 Di VPS Windows (PowerShell):
 Buka PowerShell lalu jalankan:
@@ -20,17 +23,46 @@ irm https://raw.githubusercontent.com/AbyanZainZ/Vibot/main/install.ps1 | iex
 
 ---
 
-## 📁 Struktur File Lebih Rapi (Terpisah Sendiri-Sendiri):
+## 🚀 Cara Menjalankan
 
-Sekarang kamu tidak perlu repot mengedit array di dalam config! Semuanya sudah dipisah sendiri-sendiri:
+### Langkah 1: Cari & Validasi Proxy Live (Otomatis dari GitHub)
+Program ini akan otomatis mengunduh ribuan proxy gratis dari 90+ repository GitHub, menguji mana yang aktif, dan **hanya menyimpan proxy LIVE** ke `proxy.txt` / `proxies.txt` (proxy mati otomatis dibuang).
 
-| File | Fungsi | Keterangan |
+- **Di Linux VPS / Docker**:
+  ```bash
+  cd /VidBot
+  ./start_proxyScrape.sh
+  ```
+- **Di Windows VPS**:
+  Klik 2x file `START_PROXY_SCRAPE.bat`
+
+### Langkah 2: Isi Link Video Target
+Masukkan link video Doodstream / Vidara kamu ke dalam file **`link.txt`** (1 baris per link).
+
+### Langkah 3: Jalankan Viewer Bot
+- **Di Linux VPS / Docker**:
+  ```bash
+  cd /VidBot
+  ./start_bot.sh
+  ```
+- **Di Windows VPS**:
+  Klik 2x file `START_BOT.bat`
+
+---
+
+## 📁 Struktur File Lengkap & Rapi
+
+Semua komponen dibuat modular dan terpisah sendiri-sendiri agar mudah dikelola:
+
+| File / Script | Fungsi | Keterangan |
 | :--- | :--- | :--- |
 | **`link.txt`** | **Daftar Link Video** | Masukkan link video target (1 baris per link). Bebas masukkan puluhan/ratusan link! |
-| **`proxies.txt`** | **Daftar Proxy** | Masukkan proxy kamu (1 baris per proxy). Mendukung HTTP & SOCKS5. |
+| **`proxy.txt`** / **`proxies.txt`** | **Daftar Proxy Live** | Hasil otomatis dari scraper atau isi sendiri (HTTP & SOCKS5). |
+| **`start_proxyScrape.sh`** | **Launcher Scraper (Linux)** | Jalankan untuk mencari & cek live proxy secara otomatis di Linux. |
+| **`START_PROXY_SCRAPE.bat`** | **Launcher Scraper (Win)** | Klik 2x untuk mencari & cek live proxy di Windows. |
+| **`start_bot.sh`** | **Launcher Bot (Linux)** | Jalankan bot viewer di VPS Linux / Docker. |
+| **`START_BOT.bat`** | **Launcher Bot (Win)** | Klik 2x untuk menjalankan bot viewer di VPS Windows. |
 | **`config.json`** | **Pengaturan Engine** | Cukup untuk mengatur durasi tonton, jumlah slot browser, headless, dll. |
-| **`START_BOT.bat`** | **Launcher Windows** | Klik 2x untuk menjalankan bot di VPS Windows. |
-| **`start_bot.sh`** | **Launcher Linux** | Jalankan `./start_bot.sh` di VPS Linux / Docker. |
 
 ---
 

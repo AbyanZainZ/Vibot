@@ -274,13 +274,18 @@ if Sumber_Proxy == "Upload File .txt Sekarang (Widget)":
         Sumber_Proxy = "Load dari File Lokal / Drive"
 
 if Sumber_Proxy == "Load dari File Lokal / Drive":
-    target_path = Custom_Path_Proxy.strip() if Nama_File_Proxy_Lokal == "Custom Path" and Custom_Path_Proxy.strip() else Nama_File_Proxy_Lokal
+    base_dir = Path(__file__).resolve().parent
     candidate_paths = [
         Path(target_path),
+        base_dir / target_path,
+        Path('.') / target_path,
+        Path('proxy.txt'),
+        Path('proxies.txt'),
+        base_dir / 'proxy.txt',
+        base_dir / 'proxies.txt',
         Path('/content') / target_path,
         Path('/content/drive/MyDrive') / target_path,
         Path('/content/drive/MyDrive/Vidara_Proxies') / target_path,
-        Path('.') / target_path
     ]
     found = False
     for p in candidate_paths:
