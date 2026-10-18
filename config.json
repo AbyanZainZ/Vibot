@@ -1,0 +1,28 @@
+{
+  "target_urls": [
+    "https://vidara.so/v/UDQvQR86iSidN",
+    "https://vidara.to/v/bajvKatP3cxK",
+    "https://vidara.to/v/TpIkkDRdFiiY",
+    "https://vidara.to/v/IggCpQgKVfCS",
+    "https://vidara.to/v/1zUQttZOpCuY",
+    "https://vidara.to/v/LpRqYH4UAgTUS",
+    "https://vidara.to/v/VFF4XpP1n2nK",
+    "https://vidara.to/v/Z4Q7Q2Q8uX5s",
+    "https://playmogo.com/d/2kgtwakxl10w",
+    "https://playmogo.com/d/xamx63i20glo"
+  ],
+  "engine_mode": "camoufox",
+  "headless_mode": true,
+  "max_concurrent_browsers": 2,
+  "start_stagger_delay_sec": 2.0,
+  "watch_duration_sec": 180,
+  "execution_mode": "loop",
+  "round_delay_sec": 10,
+  "max_proxy_retries": 5,
+  "prevent_windows_sleep": true,
+  "proxy_pool": {
+    "proxy_file": "proxies.txt",
+    "default_protocol": "http",
+    "rotation_mode": "random"
+  }
+}
