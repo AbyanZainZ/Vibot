@@ -2,20 +2,22 @@
 # -*- coding: utf-8 -*-
 """
 ⚡ Fast 2-Stage Proxy Scraper & Deep Vidara Checker (Vibot Edition)
-Diadaptasi & diselaraskan langsung dari ProxyvidaraV2.5.ipynb
+Diadaptasi & diselaraskan langsung dari standar ketat ProxyvidaraV2.5.ipynb
 Repository: https://github.com/AbyanZainZ/Vibot
 Author: AbyanZainZ
 
-Standar Kategori LIVE vs DEAD (Identik dengan ProxyvidaraV2.5.ipynb):
-1. Tahap 1: Fast Connectivity Pre-Filter (membuang 95%+ proxy mati dengan cepat).
-2. Tahap 2: Deep Vidara Strict Checker:
-   - Validasi Handshake HTTPS SSL / Port 443 langsung ke target: https://vidara.to/
-   - Mengharuskan HTTP status_code == 200
-   - Mengharuskan respon berisi signature asli: 'vidara'
-   - Mengharuskan BEBAS dari blokir Cloudflare captcha ('challenge-platform', 'cf-browser-verification', dsb.)
-   - Mengharuskan ukuran respon HTML valid (>= 1,000 bytes)
-   - Hanya proxy yang lolos Tahap 2 yang disimpan ke 'proxy.txt' & 'proxies.txt'.
-   - Proxy mati / gagal / CF block langsung dibuang (DEAD).
+Ketentuan Kategori LIVE vs DEAD (Identik dengan ProxyvidaraV2.5.ipynb):
+1. TAHAP 1 (Fast Pre-Filter):
+   - Uji koneksi cepat dengan Google generate_204 / Cloudflare trace.
+   - Membuang 95%+ proxy mati hanya dalam hitungan detik.
+2. TAHAP 2 (Deep Vidara Strict Checker):
+   - Validasi Handshake HTTPS SSL langsung ke target: https://vidara.to/ (atau fallback https://vidara.so/)
+   - Status code HARUS 200 (atau redirect sah)
+   - Respon HARUS memuat signature asli: 'vidara'
+   - BEBAS dari pemblokiran Cloudflare captcha ('challenge-platform', 'cf-browser-verification', 'attention required!', 'access denied', '403 forbidden')
+   - Panjang respon HTML HARUS valid (>= 1,000 bytes)
+   - HANYA proxy yang lolos Tahap 2 yang disimpan ke 'proxy.txt' & 'proxies.txt'.
+   - Proxy mati / gagal handshake / CF block langsung dibuang (DEAD).
 """
 
 import os
@@ -24,7 +26,7 @@ import time
 import re
 import json
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from collections import deque
 import urllib3
@@ -43,21 +45,21 @@ OUTPUT_FILES = [BASE_DIR / "proxy.txt", BASE_DIR / "proxies.txt"]
 OUTPUT_RESIDENTIAL = BASE_DIR / "LIVE_Proxy_Residential.txt"
 OUTPUT_WITH_ISP = BASE_DIR / "LIVE_PROXY_WITH_ISP.txt"
 
-# Pengaturan Konfigurasi Checker (Sesuai ProxyvidaraV2.5)
+# Target & Parameter Pengecekan
 TARGET_URL = "https://vidara.to/"
 FALLBACK_TARGET_URL = "https://vidara.so/"
 PREFILTER_URL = "http://www.google.com/generate_204"
 PREFILTER_FALLBACK = "http://1.1.1.1/cdn-cgi/trace"
 
-SCRAPE_WORKERS = 30
-STAGE1_WORKERS = 200
+SCRAPE_WORKERS = 35
+STAGE1_WORKERS = 300
 STAGE1_TIMEOUT = 2.0
 
-STAGE2_WORKERS = 100
+STAGE2_WORKERS = 80
 STAGE2_CONNECT_TIMEOUT = 3.0
 STAGE2_READ_TIMEOUT = 5.0
 
-MAX_LIVE_TARGET = 150  # Target proxy live lolos Tahap 2 (0 = cek seluruh kandidat)
+MAX_LIVE_TARGET = 150  # Otomatis selesai jika sudah mengumpulkan N proxy live Vidara (0 = cek semua)
 
 BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -317,16 +319,19 @@ def main():
     print("==================================================================\n")
 
     # 1. SCRAPING DARI GITHUB
-    print("⏳ [1/3] Mengunduh proxy dari 40+ sumber repository GitHub...")
+    print("⏳ [1/3] Mengunduh proxy dari 40+ repository GitHub...")
     all_raw = set()
     t_start_scrape = time.time()
 
     with ThreadPoolExecutor(max_workers=SCRAPE_WORKERS) as executor:
         futures = [executor.submit(scrape_single_source, proto, url) for proto, url in GITHUB_SOURCES]
-        for f in as_completed(futures):
-            res = f.result()
-            for p in res:
-                all_raw.add(p)
+        for f in futures:
+            try:
+                res = f.result()
+                for p in res:
+                    all_raw.add(p)
+            except Exception:
+                pass
 
     candidate_list = list(all_raw)
     dur_scrape = time.time() - t_start_scrape
@@ -341,20 +346,53 @@ def main():
     print("⏳ [2/3] TAHAP 1: Fast Connectivity Pre-Filter...")
     print(f"[*] Menjalankan {STAGE1_WORKERS} worker untuk membuang proxy yang 100% mati...")
     stage1_live = []
+    done_s1 = 0
     t_start_s1 = time.time()
+    last_print_s1 = time.time()
 
-    with ThreadPoolExecutor(max_workers=STAGE1_WORKERS) as executor:
-        future_map = {executor.submit(stage1_fast_check, p): p for p in candidate_list}
-        for fut in as_completed(future_map):
-            is_ok, p_url, lat = fut.result()
-            if is_ok:
-                stage1_live.append(p_url)
-            if len(future_map) > 0 and len(stage1_live) % 100 == 0 and len(stage1_live) > 0:
-                print(f"   ⚡ [Tahap 1 Pre-Filter] Ditemukan {len(stage1_live):,} kandidat konektif...")
+    batch_s1 = STAGE1_WORKERS * 2
+    it_s1 = iter(candidate_list)
 
-            # Jika kandidat tahap 1 sudah cukup banyak untuk diuji di tahap 2
-            if len(stage1_live) >= (MAX_LIVE_TARGET * 10):
-                print(f"   🎯 Mengumpulkan {len(stage1_live):,} kandidat tahap 1, melanjutkan ke Tahap 2...")
+    with ThreadPoolExecutor(max_workers=STAGE1_WORKERS) as ex_s1:
+        futs_s1 = {}
+        for _ in range(batch_s1):
+            try:
+                p = next(it_s1)
+                futs_s1[ex_s1.submit(stage1_fast_check, p)] = p
+            except StopIteration:
+                break
+
+        while futs_s1:
+            dones = [f for f in list(futs_s1.keys()) if f.done()]
+            if not dones:
+                time.sleep(0.02)
+                continue
+
+            for f in dones:
+                p = futs_s1.pop(f)
+                done_s1 += 1
+                try:
+                    is_ok, p_url, lat = f.result()
+                    if is_ok:
+                        stage1_live.append(p_url)
+                except Exception:
+                    pass
+
+                try:
+                    nxt = next(it_s1)
+                    futs_s1[ex_s1.submit(stage1_fast_check, nxt)] = nxt
+                except StopIteration:
+                    pass
+
+            now_s1 = time.time()
+            if now_s1 - last_print_s1 >= 2.0:
+                speed = done_s1 / max(1e-3, (now_s1 - t_start_s1))
+                print(f"   ⏱️ [Tahap 1 Pre-Filter] Diperiksa: {done_s1:,}/{len(candidate_list):,} | Lolos: {len(stage1_live):,} | Speed: {speed:.0f} req/s")
+                last_print_s1 = now_s1
+
+            # Jika kandidat tahap 1 sudah cukup banyak untuk memanen proxy live tahap 2
+            if len(stage1_live) >= (MAX_LIVE_TARGET * 6):
+                print(f"\n   🎯 Terkumpul {len(stage1_live):,} kandidat Tahap 1. Melanjutkan ke Tahap 2...")
                 break
 
     print(f"✅ Tahap 1 Selesai dalam {time.time() - t_start_s1:.1f}s | Terkumpul {len(stage1_live):,} kandidat lolos ke Tahap 2.\n")
@@ -379,6 +417,7 @@ def main():
     checked_s2 = 0
     file_lock = threading.Lock()
     t_start_s2 = time.time()
+    last_print_s2 = time.time()
 
     def save_live_proxy_item(p_str):
         with file_lock:
@@ -386,23 +425,50 @@ def main():
                 with open(out_p, "a", encoding="utf-8") as f:
                     f.write(p_str + "\n")
 
+    batch_s2 = STAGE2_WORKERS * 2
+    it_s2 = iter(stage1_live)
+
     try:
-        with ThreadPoolExecutor(max_workers=STAGE2_WORKERS) as executor:
-            future_to_proxy = {executor.submit(check_vidara_deep, p): p for p in stage1_live}
-            for fut in as_completed(future_to_proxy):
-                res = fut.result()
-                checked_s2 += 1
+        with ThreadPoolExecutor(max_workers=STAGE2_WORKERS) as ex_s2:
+            futs_s2 = {}
+            for _ in range(batch_s2):
+                try:
+                    p = next(it_s2)
+                    futs_s2[ex_s2.submit(check_vidara_deep, p)] = p
+                except StopIteration:
+                    break
 
-                if res['is_live']:
-                    live_vidara.append(res)
-                    save_live_proxy_item(res['proxy'])
-                    print(f"🟢 [LIVE VIDARA #{len(live_vidara)}] {res['proxy']} ({res['latency_ms']}ms) - HTTP {res['status_code']}")
-                else:
-                    dead_s2 += 1
+            while futs_s2:
+                dones = [f for f in list(futs_s2.keys()) if f.done()]
+                if not dones:
+                    time.sleep(0.03)
+                    continue
 
-                if checked_s2 % 25 == 0:
-                    speed = checked_s2 / max(1, (time.time() - t_start_s2))
+                for f in dones:
+                    p = futs_s2.pop(f)
+                    checked_s2 += 1
+                    try:
+                        res = f.result()
+                        if res['is_live']:
+                            live_vidara.append(res)
+                            save_live_proxy_item(res['proxy'])
+                            print(f"🟢 [LIVE VIDARA #{len(live_vidara)}] {res['proxy']} ({res['latency_ms']}ms) - HTTP {res['status_code']}")
+                        else:
+                            dead_s2 += 1
+                    except Exception:
+                        dead_s2 += 1
+
+                    try:
+                        nxt = next(it_s2)
+                        futs_s2[ex_s2.submit(check_vidara_deep, nxt)] = nxt
+                    except StopIteration:
+                        pass
+
+                now_s2 = time.time()
+                if now_s2 - last_print_s2 >= 2.5:
+                    speed = checked_s2 / max(1e-3, (now_s2 - t_start_s2))
                     print(f"   ⏱️ Tahap 2: {checked_s2}/{len(stage1_live)} | LIVE Vidara: {len(live_vidara)} | Gagal/Dead: {dead_s2} | Speed: {speed:.1f} req/s")
+                    last_print_s2 = now_s2
 
                 if MAX_LIVE_TARGET > 0 and len(live_vidara) >= MAX_LIVE_TARGET:
                     print(f"\n🎯 Target {MAX_LIVE_TARGET} proxy aktif lolos Vidara berhasil terpenuhi!")
@@ -449,7 +515,7 @@ def main():
     print("👉 Proxy di file 'proxy.txt' sudah diverifikasi 100% bisa membuka Vidara.")
     print("   Jalankan bot sekarang:")
     print("   Linux: ./start_bot.sh")
-    print("   Windows: START_BOT.bat")
+    print("   Windows: START_PROXY_SCRAPE.bat / START_BOT.bat")
 
 if __name__ == "__main__":
     main()
