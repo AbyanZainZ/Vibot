@@ -1,61 +1,75 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  VIBOT ONE-LINE CLI INSTALLER FOR LINUX VPS
+#  VIDBOT ONE-LINE CLI INSTALLER FOR LINUX VPS & DOCKER WEB TOP
 #  Repository: https://github.com/AbyanZainZ/Vibot
 # ==============================================================================
 set -e
 
 echo "======================================================================"
-echo " 🎬 MEMASANG VIBOT (VIDARA & DOODSTREAM MULTI-PROXY BOT) DI VPS"
+echo " 🎬 MEMASANG VIDBOT (VIDARA & DOODSTREAM MULTI-PROXY BOT)"
 echo "======================================================================"
 
-TARGET_DIR="$HOME/Vibot"
-
-# 1. Update & Paket Sistem
-echo "⏳ [1/4] Memeriksa paket dasar sistem..."
-if command -v apt-get &> /dev/null; then
-    sudo apt-get update -y
-    sudo apt-get install -y python3 python3-pip python3-venv git curl
+# Tentukan folder target rapi: /VidBot atau ~/VidBot
+if [ "$(id -u)" -eq 0 ]; then
+    TARGET_DIR="/VidBot"
+else
+    TARGET_DIR="$HOME/VidBot"
 fi
 
-# 2. Download / Clone Vibot
-echo "⏳ [2/4] Mengunduh repository Vibot..."
+echo "[*] Lokasi Instalasi Target: $TARGET_DIR"
+
+# 1. Update & Paket Sistem
+echo ""
+echo "⏳ [1/4] Memeriksa paket dasar sistem..."
+if command -v apt-get &> /dev/null; then
+    sudo apt-get update -y 2>/dev/null || true
+    sudo apt-get install -y python3 python3-pip python3-venv git curl 2>/dev/null || true
+fi
+
+# 2. Download / Clone VidBot ke foldernya sendiri
+echo ""
+echo "⏳ [2/4] Mengunduh source code VidBot ke: $TARGET_DIR ..."
 if [ ! -d "$TARGET_DIR" ]; then
     git clone https://github.com/AbyanZainZ/Vibot.git "$TARGET_DIR"
+    echo "✅ Berhasil mengunduh ke: $TARGET_DIR"
 else
-    echo "ℹ️ Folder Vibot sudah ada, memperbarui kode..."
+    echo "ℹ️ Folder $TARGET_DIR sudah ada, memperbarui file terbaru..."
     cd "$TARGET_DIR" && git pull || true
 fi
 
 cd "$TARGET_DIR"
 
-# 3. Pasang Library Python
-echo "⏳ [3/4] Memasang dependensi Python..."
-# Matikan proteksi PEP 668 secara global otomatis
-pip config set global.break-system-packages true 2>/dev/null || true
-python3 -m pip config set global.break-system-packages true 2>/dev/null || true
+# 3. Setup Virtual Environment (VENV) di dalam folder VidBot
+echo ""
+echo "⏳ [3/4] Menyiapkan environment Python khusus di $TARGET_DIR/venv ..."
+if [ ! -d "$TARGET_DIR/venv" ]; then
+    python3 -m venv "$TARGET_DIR/venv"
+fi
 
-pip install --break-system-packages -r requirements.txt 2>/dev/null || \
-python3 -m pip install --break-system-packages -r requirements.txt 2>/dev/null || \
-pip install -r requirements.txt
+# Upgrade pip & install requirements
+echo "[*] Memasang library Python..."
+"$TARGET_DIR/venv/bin/python" -m pip install --upgrade pip 2>/dev/null || true
+"$TARGET_DIR/venv/bin/pip" install -r requirements.txt
 
 # 4. Unduh Engine Browser Playwright
-echo "⏳ [4/4] Memasang driver browser Playwright & Camoufox..."
-python3 -m playwright install chromium firefox 2>/dev/null || \
-playwright install chromium firefox 2>/dev/null || true
+echo ""
+echo "⏳ [4/4] Memasang driver browser Playwright (Chromium & Firefox)..."
+"$TARGET_DIR/venv/bin/playwright" install chromium firefox 2>/dev/null || true
 
-chmod +x start_bot.sh
+chmod +x "$TARGET_DIR/start_bot.sh"
 
 echo ""
 echo "======================================================================"
-echo " ✅ INSTALASI VIBOT SELESAI & SIAP JALAN!"
+echo " 🎉 INSTALASI VIDBOT SUKSES BESAR!"
 echo "======================================================================"
-echo " 📁 Lokasi Bot: $TARGET_DIR"
+echo " 📁 Lokasi Penyimpanan: $TARGET_DIR"
+echo " 📂 Path Lengkap: $(cd "$TARGET_DIR" && pwd)"
 echo ""
-echo " 🚀 Perintah untuk Menjalankan Bot:"
-echo "    cd ~/Vibot && ./start_bot.sh"
+echo " 🚀 Cara Menjalankan Bot:"
+echo "    cd $TARGET_DIR"
+echo "    ./start_bot.sh"
 echo ""
-echo " ⚙️ Untuk Edit URL / Proxy:"
-echo "    nano ~/Vibot/config.json"
-echo "    nano ~/Vibot/proxies.txt"
+echo " ⚙️ File Konfigurasi & Proxy Ada di:"
+echo "    - $TARGET_DIR/config.json  (Target URL, slot browser, mode proxy)"
+echo "    - $TARGET_DIR/proxies.txt  (Daftar proxy kamu)"
 echo "======================================================================"

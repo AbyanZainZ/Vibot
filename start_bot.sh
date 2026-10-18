@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  VIDARA & DOODSTREAM VIEWER BOT V4.5 (LINUX & DOCKER LAUNCHER)
+#  VIDBOT VIEWER BOT LAUNCHER (AUTO VENV DETECTION)
 # ==============================================================================
 set -e
 
@@ -8,26 +8,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "======================================================================"
-echo "   VIDARA & DOODSTREAM VIEWER BOT V4.5 (LINUX / CLOUD DOCKER)"
-echo "   Clean Proxy-Only Edition (Zero VPN Daemon / Zero Wireproxy)"
+echo "   🎬 MENJALANKAN VIDBOT (VIDARA & DOODSTREAM VIEWER BOT)"
+echo "   📁 Direktori: $SCRIPT_DIR"
 echo "======================================================================"
 
-# Cek Python 3
-if ! command -v python3 &> /dev/null; then
-    echo "[!] Python 3 belum terpasang. Memasang python3 & pip..."
-    sudo apt update && sudo apt install -y python3 python3-pip python3-venv
-fi
-
-# Cek dependensi
-if ! python3 -c "import playwright, camoufox, curl_cffi, psutil" &> /dev/null; then
-    echo "[*] Menginstal library python..."
-    pip config set global.break-system-packages true 2>/dev/null || true
-    python3 -m pip config set global.break-system-packages true 2>/dev/null || true
-    pip install --break-system-packages -r requirements.txt || pip install -r requirements.txt
-    python3 -m playwright install chromium firefox || playwright install chromium firefox
+# Cek Virtual Environment bawaan
+if [ -f "$SCRIPT_DIR/venv/bin/python" ]; then
+    PY_BIN="$SCRIPT_DIR/venv/bin/python"
+    echo "[*] Menggunakan Python Virtual Environment: $PY_BIN"
+elif command -v python3 &> /dev/null; then
+    PY_BIN="python3"
+    echo "[*] Menggunakan System Python 3: $(which python3)"
+else
+    echo "[!] Python tidak ditemukan! Silakan install python3 terlebih dahulu."
+    exit 1
 fi
 
 echo "[*] Menjalankan Bot Viewer..."
 echo "Tekan Ctrl+C untuk berhenti."
 echo ""
-python3 vidara_bot.py
+"$PY_BIN" vidara_bot.py
