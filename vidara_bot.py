@@ -274,6 +274,7 @@ if Sumber_Proxy == "Upload File .txt Sekarang (Widget)":
         Sumber_Proxy = "Load dari File Lokal / Drive"
 
 if Sumber_Proxy == "Load dari File Lokal / Drive":
+    target_path = Custom_Path_Proxy.strip() if ('Custom_Path_Proxy' in globals() and Nama_File_Proxy_Lokal == "Custom Path" and Custom_Path_Proxy.strip()) else Nama_File_Proxy_Lokal
     base_dir = Path(__file__).resolve().parent
     candidate_paths = [
         Path(target_path),
