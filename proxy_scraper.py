@@ -391,7 +391,7 @@ def main():
                 last_print_s1 = now_s1
 
             # Jika kandidat tahap 1 sudah cukup banyak untuk memanen proxy live tahap 2
-            if len(stage1_live) >= (MAX_LIVE_TARGET * 6):
+            if len(stage1_live) >= max(300, MAX_LIVE_TARGET * 3):
                 print(f"\n   🎯 Terkumpul {len(stage1_live):,} kandidat Tahap 1. Melanjutkan ke Tahap 2...")
                 break
 
