@@ -31,6 +31,11 @@ cd "$TARGET_DIR"
 
 # 3. Pasang Library Python
 echo "⏳ [3/4] Memasang dependensi Python..."
+# Matikan proteksi PEP 668 secara global otomatis
+pip config set global.break-system-packages true 2>/dev/null || true
+python3 -m pip config set global.break-system-packages true 2>/dev/null || true
+
+pip install --break-system-packages -r requirements.txt 2>/dev/null || \
 python3 -m pip install --break-system-packages -r requirements.txt 2>/dev/null || \
 pip install -r requirements.txt
 

@@ -21,7 +21,9 @@ fi
 # Cek dependensi
 if ! python3 -c "import playwright, camoufox, curl_cffi, psutil" &> /dev/null; then
     echo "[*] Menginstal library python..."
-    python3 -m pip install --break-system-packages -r requirements.txt || pip install -r requirements.txt
+    pip config set global.break-system-packages true 2>/dev/null || true
+    python3 -m pip config set global.break-system-packages true 2>/dev/null || true
+    pip install --break-system-packages -r requirements.txt || pip install -r requirements.txt
     python3 -m playwright install chromium firefox || playwright install chromium firefox
 fi
 
