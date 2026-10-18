@@ -52,14 +52,14 @@ PREFILTER_URL = "http://www.google.com/generate_204"
 PREFILTER_FALLBACK = "http://1.1.1.1/cdn-cgi/trace"
 
 SCRAPE_WORKERS = 35
-STAGE1_WORKERS = 300
+STAGE1_WORKERS = 400
 STAGE1_TIMEOUT = 2.0
 
-STAGE2_WORKERS = 80
+STAGE2_WORKERS = 120
 STAGE2_CONNECT_TIMEOUT = 3.0
 STAGE2_READ_TIMEOUT = 5.0
 
-MAX_LIVE_TARGET = 150  # Otomatis selesai jika sudah mengumpulkan N proxy live Vidara (0 = cek semua)
+MAX_LIVE_TARGET = 0  # 0 = MAKSIMALKAN PENUH (Periksa seluruh kandidat & kumpulkan sebanyak-banyaknya tanpa batasan!)
 
 BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -315,7 +315,7 @@ def main():
     print("Sesuai Standar Kategori Ketat: ProxyvidaraV2.5.ipynb")
     print(f"Target Validasi Handshake: {TARGET_URL}")
     print(f"Target Output Live      : {', '.join([p.name for p in OUTPUT_FILES])}")
-    print(f"Batas Target Proxy Live  : {MAX_LIVE_TARGET} Proxy")
+    print(f"Batas Target Proxy Live  : {'MAKSIMAL (Seluruh kandidat diperiksa tanpa batas!)' if MAX_LIVE_TARGET <= 0 else f'{MAX_LIVE_TARGET} Proxy'}")
     print("==================================================================\n")
 
     # 1. SCRAPING DARI GITHUB
@@ -390,8 +390,8 @@ def main():
                 print(f"   ⏱️ [Tahap 1 Pre-Filter] Diperiksa: {done_s1:,}/{len(candidate_list):,} | Lolos: {len(stage1_live):,} | Speed: {speed:.0f} req/s")
                 last_print_s1 = now_s1
 
-            # Jika kandidat tahap 1 sudah cukup banyak untuk memanen proxy live tahap 2
-            if len(stage1_live) >= max(300, MAX_LIVE_TARGET * 3):
+            # Jika dibatasi
+            if MAX_LIVE_TARGET > 0 and len(stage1_live) >= (MAX_LIVE_TARGET * 3):
                 print(f"\n   🎯 Terkumpul {len(stage1_live):,} kandidat Tahap 1. Melanjutkan ke Tahap 2...")
                 break
 

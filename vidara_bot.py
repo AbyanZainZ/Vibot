@@ -793,18 +793,6 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
                     user_agent=ua
                 )
                 page = await context.new_page()
-
-                # V3.8 Popup Killer: Tutup otomatis popup/popunder tab iklan DoodStream (TIDAK menutup tab utama!)
-                async def _auto_close_popup(new_page):
-                    if new_page == page:
-                        return
-                    try:
-                        await asyncio.sleep(1.0)
-                        await new_page.close()
-                    except Exception:
-                        pass
-                page.on("popup", lambda p: asyncio.create_task(_auto_close_popup(p)))
-                context.on("page", lambda p: asyncio.create_task(_auto_close_popup(p)))
             else:
                 from playwright.async_api import async_playwright
                 pw_instance = await async_playwright().start()
@@ -837,8 +825,19 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
                     ignore_https_errors=True
                 )
                 page = await context.new_page()
-                page.on("popup", lambda p: asyncio.create_task(_auto_close_popup(p)))
-                context.on("page", lambda p: asyncio.create_task(_auto_close_popup(p)))
+
+            # V3.8 Popup Killer: Tutup otomatis popup/popunder tab iklan DoodStream (TIDAK menutup tab utama!)
+            async def _auto_close_popup(new_page):
+                if new_page == page:
+                    return
+                try:
+                    await asyncio.sleep(1.0)
+                    await new_page.close()
+                except Exception:
+                    pass
+
+            page.on("popup", lambda p: asyncio.create_task(_auto_close_popup(p)))
+            context.on("page", lambda p: asyncio.create_task(_auto_close_popup(p)))
 
             # V3.7 Resource-Saving Route Filter: Block heavy trackers/ad networks
             async def _filter_traffic(route):
