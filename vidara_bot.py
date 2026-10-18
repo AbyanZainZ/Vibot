@@ -24,6 +24,10 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+# Linux Container Root fix for Camoufox
+if sys.platform.startswith("linux") and (os.environ.get("HOME") == "/config" or os.environ.get("HOME", "").startswith("/home/abc")):
+    os.environ["HOME"] = "/root"
+
 # Safe terminal dummy for IPython display if running outside notebook
 try:
     from IPython.display import display, HTML
@@ -68,10 +72,8 @@ if CONFIG_PATH.exists():
                 Engine_Mode = "Playwright Standar (Chromium)"
             else:
                 Engine_Mode = "Camoufox (Anti-Detect & Stealth - Rekomendasi)"
-        import platform as _plat
-        if _plat.machine().lower() in ('aarch64', 'arm64') and sys.platform.startswith('linux'):
-            Engine_Mode = "Playwright Standar (Chromium)"
-            print("ℹ️ Terdeteksi sistem Linux ARM64 (aarch64). Menggunakan engine Playwright Chromium secara otomatis.")
+        # Camoufox supports Linux ARM64 with bundled codecs and anti-detect
+        pass
         if "headless_mode" in cfg:
             Headless_Mode = bool(cfg["headless_mode"])
         if "max_concurrent_browsers" in cfg:
@@ -843,6 +845,12 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
             async def _filter_traffic(route):
                 r_url = route.request.url.lower()
                 r_type = route.request.resource_type
+
+                # 0. Cegah redirect ad-cloak mirror dstyladsg.com (force playHere() di vidara.to)
+                if "dstyladsg.com" in r_url:
+                    await route.abort()
+                    return
+
                 # 1. JANGAN PERNAH blokir stream video, chunk, token api, atau script player penting
                 essential_patterns = [
                     "/api/", ".mp4", ".m3u8", ".ts", "master.m3u8",
@@ -877,12 +885,27 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
             except Exception:
                 pass
 
-            # INJEKSI IDENTITAS BROWSER: Mencegah status 'Unknown' pada skrip analitik Vidara
+            # INJEKSI IDENTITAS BROWSER: Mencegah status 'Unknown' / AdBlock pada skrip analitik Vidara
             await page.add_init_script("""
             if (!window.chrome) {
                 window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
             }
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window._adb = 0;
+            window._wv = 0;
+
+            // Normalisasi fetch: hapus keepalive agar terpantau Playwright dan terkirim mulus
+            const sc = document.createElement('script');
+            sc.textContent = `
+                const _origFetch = window.fetch;
+                window.fetch = function(url, opts) {
+                    if (opts && opts.keepalive) {
+                        delete opts.keepalive;
+                    }
+                    return _origFetch.apply(this, arguments);
+                };
+            `;
+            (document.head || document.documentElement).appendChild(sc);
             """)
 
             vidara_stream_active = False
@@ -949,18 +972,28 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
                             if (typeof dsplayer.paused === 'function' && !dsplayer.paused()) return { playing: true, type: 'dsplayer' };
                         }
 
-                        // 2. Vidara JWPlayer
-                        if (window.jwplayer && typeof window.jwplayer === 'function') {
-                            try {
-                                const jw = window.jwplayer();
-                                if (jw) {
-                                    try { jw.setMute(true); } catch(e) {}
-                                    try { jw.play(); } catch(e) {}
-                                    const st = typeof jw.getState === 'function' ? jw.getState() : '';
-                                    if (st === 'playing' || st === 'buffering') return { playing: true, type: 'jwplayer' };
+                        // 2. Vidara JWPlayer (Main World & Window)
+                        try {
+                            const sc = document.createElement('script');
+                            sc.textContent = `
+                                if (typeof player !== 'undefined' && typeof player.play === 'function') {
+                                    try { player.setMute(true); } catch(e) {}
+                                    try { player.play(); } catch(e) {}
+                                    document.body.setAttribute('data-jst', typeof player.getState === 'function' ? player.getState() : '');
+                                } else if (window.jwplayer && typeof window.jwplayer === 'function') {
+                                    const j = window.jwplayer();
+                                    if (j) {
+                                        try { j.setMute(true); } catch(e) {}
+                                        try { j.play(); } catch(e) {}
+                                        document.body.setAttribute('data-jst', typeof j.getState === 'function' ? j.getState() : '');
+                                    }
                                 }
-                            } catch(e) {}
-                        }
+                            `;
+                            document.body.appendChild(sc);
+                            sc.remove();
+                            const pst = document.body.getAttribute('data-jst');
+                            if (pst === 'playing' || pst === 'buffering') return { playing: true, type: 'jwplayer_main' };
+                        } catch(e) {}
 
                         // 3. Native HTML5 Video Element
                         const vids = document.querySelectorAll('video');
@@ -1031,8 +1064,26 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
                 await asyncio.sleep(5)
                 elapsed = int(time.time() - t_start)
 
+                # Gerakan mouse natural berkala untuk memicu event mousemove dan menaikkan mouse entropy
+                try:
+                    await human_curve_move(page, random.randint(150, 500), random.randint(150, 400), random.randint(250, 700), random.randint(200, 550), steps=8)
+                except Exception:
+                    pass
+
                 cur_wt = await page.evaluate("""() => {
-                    if (typeof totalWatchTime !== 'undefined' && totalWatchTime > 0) return Math.floor(totalWatchTime);
+                    // 1. Cek totalWatchTime dari context utama Vidara
+                    try {
+                        const sc = document.createElement('script');
+                        sc.textContent = `
+                            document.body.setAttribute('data-wt', typeof totalWatchTime !== 'undefined' ? totalWatchTime : -1);
+                            document.body.setAttribute('data-sent', typeof hasSentData !== 'undefined' ? hasSentData : false);
+                        `;
+                        document.body.appendChild(sc);
+                        sc.remove();
+                        const v_wt = parseInt(document.body.getAttribute('data-wt') || '-1', 10);
+                        if (v_wt >= 0) return v_wt;
+                    } catch(e) {}
+
                     if (typeof dsplayer !== 'undefined' && dsplayer && typeof dsplayer.currentTime === 'function') {
                         const ct = dsplayer.currentTime();
                         if (ct > 0) return Math.floor(ct);
@@ -1055,14 +1106,18 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
 
                 video_title_display = task.get("title") or page_title or f"{platform} Video"
 
-                # Deteksi View Valid Otomatis saat video terkonfirmasi berputar
+                # Deteksi View Resmi Valid (100% genuine validation, persis Vidara-geminiV3.7.ipynb)
                 if not view_counted:
-                    if cur_wt >= 10:
-                        view_counted = True
-                        print(f"[{task['id']}] 🎯 VIEW RESMI TERCATAT: Video berhasil ditonton {cur_wt}s (Target >= 10s terpenuhi)!")
-                    elif (dood_stream_active or vidara_stream_active) and cur_wt >= 3:
-                        view_counted = True
-                        print(f"[{task['id']}] 🎯 VIEW RESMI TERCATAT: Stream Video Aktif ({cur_wt}s ditonton)!")
+                    if platform == "Vidara":
+                        # Cek apakah visitorData Vidara sudah terenkripsi dan terkirim ke /api/count
+                        is_v_sent = await page.evaluate("() => document.body.getAttribute('data-sent') === 'true'")
+                        if is_v_sent:
+                            view_counted = True
+                            print(f"[{task['id']}] 🎯 [VIDARA] VIEW RESMI TERCATAT: /api/count (visitorData valid & terkirim)!")
+                    elif platform == "DoodStream":
+                        if dood_stream_active and cur_wt >= 10:
+                            view_counted = True
+                            print(f"[{task['id']}] 🎯 [DOODSTREAM] VIEW RESMI TERCATAT: Stream Video Aktif ({cur_wt}s ditonton)!")
 
                 # Sampling network & CPU speed real-time
                 if elapsed % 20 < 6:
