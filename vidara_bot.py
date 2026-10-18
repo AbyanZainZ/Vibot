@@ -68,6 +68,10 @@ if CONFIG_PATH.exists():
                 Engine_Mode = "Playwright Standar (Chromium)"
             else:
                 Engine_Mode = "Camoufox (Anti-Detect & Stealth - Rekomendasi)"
+        import platform as _plat
+        if _plat.machine().lower() in ('aarch64', 'arm64') and sys.platform.startswith('linux'):
+            Engine_Mode = "Playwright Standar (Chromium)"
+            print("ℹ️ Terdeteksi sistem Linux ARM64 (aarch64). Menggunakan engine Playwright Chromium secara otomatis.")
         if "headless_mode" in cfg:
             Headless_Mode = bool(cfg["headless_mode"])
         if "max_concurrent_browsers" in cfg:
@@ -770,7 +774,19 @@ async def watch_playback(task, proxy_pool, ua_pool, engine_type="camoufox", head
                             )
                             browser_obj = await browser_cm.__aenter__()
                     else:
-                        raise b_err
+                        if "launch the browser process" in b_err_str or "executable" in b_err_str.lower():
+                            print(f"[{task['id']}] ℹ️ Camoufox tidak dapat dijalankan di lingkungan ini. Mengalihkan ke Chromium Playwright...")
+                            from playwright.async_api import async_playwright
+                            pw_instance = await async_playwright().start()
+                            browser_obj = await pw_instance.chromium.launch(
+                                headless=headless_mode,
+                                args=BROWSER_ARGS,
+                                proxy=pw_proxy
+                            )
+                            engine_type = "playwright"
+                            browser_cm = None
+                        else:
+                            raise b_err
                 context = await browser_obj.new_context(
                     ignore_https_errors=True,
                     viewport=profile['viewport'],
